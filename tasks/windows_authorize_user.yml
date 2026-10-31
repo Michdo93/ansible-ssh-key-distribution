@@ -1,0 +1,46 @@
+---
+- name: "Authorize the key for {{ kd_target }} (Windows OpenSSH)"
+  ansible.windows.win_powershell:
+    parameters:
+      User: "{{ kd_target }}"
+      SkipMissing: "{{ skip_missing_users | bool }}"
+      Line: "{{ kd_line }}"
+      Blob: "{{ kd_blob }}"
+    script: |
+      param([string]$User, [string]$Line, [string]$Blob, [bool]$SkipMissing)
+      $ErrorActionPreference = 'Stop'
+      if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
+        if ($SkipMissing) { $Ansible.Changed = $false; 'MISSING'; return }
+        throw "Account $User does not exist."
+      }
+      $admins = (Get-LocalGroup -SID 'S-1-5-32-544').Name
+      $isAdmin = [bool](Get-LocalGroupMember -Group $admins -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "$env:COMPUTERNAME\$User" -or $_.Name -eq $User })
+      if ($isAdmin) {
+        $file = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
+      } else {
+        $sid = (Get-LocalUser -Name $User).SID.Value
+        $prof = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
+        if (-not $prof) { throw "User $User has no profile yet; log in once before distributing keys." }
+        $dir = Join-Path $prof '.ssh'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $file = Join-Path $dir 'authorized_keys'
+      }
+      $lines = @()
+      if (Test-Path -LiteralPath $file) { $lines = @(Get-Content -LiteralPath $file | Where-Object { $_ -and ($_ -notmatch [regex]::Escape($Blob)) }) }
+      $old = if (Test-Path -LiteralPath $file) { (Get-Content -LiteralPath $file -Raw) } else { '' }
+      $lines += $Line
+      Set-Content -LiteralPath $file -Value $lines -Encoding ascii
+      if ($isAdmin) {
+        & icacls.exe $file /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
+      } else {
+        & icacls.exe $file /inheritance:r /grant "${User}:F" /grant '*S-1-5-18:F' /grant '*S-1-5-32-544:F' | Out-Null
+      }
+      $Ansible.Changed = ((Get-Content -LiteralPath $file -Raw) -ne $old)
+      'AUTHORIZED'
+  register: kd_win_user
+
+- name: "Remember {{ kd_target }} for the login test"
+  ansible.builtin.set_fact:
+    kd_users_done: "{{ (kd_users_done | default([])) + [kd_target] }}"
+  when: "'AUTHORIZED' in kd_win_user.output"

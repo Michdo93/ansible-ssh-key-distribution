@@ -28,7 +28,11 @@
   become: true
   vars_files: [defaults.yml]
   vars:
-    kd_user: "{{ target_user if target_user | length > 0 else ansible_user }}"
+    # -e target_user wins; otherwise the host's own key_targets; otherwise its ansible_user.
+    kd_users: >-
+      {{ [target_user] if target_user | length > 0
+         else (([key_targets] if key_targets is string else key_targets | list) if key_targets is defined
+               else [ansible_user]) }}
     kd_blob: "{{ hostvars[source_host].kd_pubkey.split(' ')[1] }}"
   tasks:
     - name: Linux / Unix targets

@@ -1,0 +1,13 @@
+---
+- name: "Look up account {{ kd_target }}"
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ kd_target }}"
+    fail_key: false
+
+- name: "Remove the public key from {{ kd_target }}"
+  ansible.builtin.lineinfile:
+    path: "{{ getent_passwd[kd_target][4] }}/.ssh/authorized_keys"
+    regexp: "^(.*\\s)?[a-z0-9@.-]+\\s{{ kd_blob | regex_escape }}(\\s.*)?$"
+    state: absent
+  when: getent_passwd[kd_target] is not none

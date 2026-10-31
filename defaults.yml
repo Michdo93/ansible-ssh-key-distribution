@@ -13,7 +13,16 @@ key_comment: "{{ source_user }}@{{ source_host }} (ansible-ssh-key-distribution)
 # Hosts that receive the public key (inventory pattern). The source is always excluded.
 target_hosts: all
 # Account on each target that will accept the key (default: that host's ansible_user).
+# Set it with -e to use the same account on all targets.
 target_user: ""
+# Optional, per host (host_vars / group_vars / inventory line, NOT here): different or
+# several accounts per target, used when target_user is not set, e.g.
+#   host_vars/pi-lab.yml:   key_targets: [pi, mqtt]
+#   group_vars/nas.yml:     key_targets: backup
+# Hosts without key_targets keep the default (their ansible_user).
+# key_targets: []
+# true: skip accounts that do not exist on a target instead of failing.
+skip_missing_users: false
 # Restrict the key to logins coming from the source host's address (from="...").
 restrict_from: false
 # Write the targets' SSH host keys into the source user's known_hosts, so the first

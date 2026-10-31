@@ -1,20 +1,6 @@
 ---
-- name: Remove the public key (Windows OpenSSH)
-  ansible.windows.win_powershell:
-    parameters:
-      User: "{{ kd_user }}"
-      Blob: "{{ kd_blob }}"
-    script: |
-      param([string]$User, [string]$Blob)
-      $ErrorActionPreference = 'Stop'
-      $files = @(Join-Path $env:ProgramData 'ssh\administrators_authorized_keys')
-      $sid = (Get-LocalUser -Name $User -ErrorAction SilentlyContinue).SID.Value
-      $prof = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
-      if ($prof) { $files += Join-Path $prof '.ssh\authorized_keys' }
-      $Ansible.Changed = $false
-      foreach ($file in $files) {
-        if (-not (Test-Path -LiteralPath $file)) { continue }
-        $all = @(Get-Content -LiteralPath $file)
-        $keep = @($all | Where-Object { $_ -notmatch [regex]::Escape($Blob) })
-        if ($keep.Count -ne $all.Count) { Set-Content -LiteralPath $file -Value $keep -Encoding ascii; $Ansible.Changed = $true }
-      }
+- name: Remove the key from each target account
+  ansible.builtin.include_tasks: windows_revoke_user.yml
+  loop: "{{ kd_users }}"
+  loop_control:
+    loop_var: kd_target

@@ -42,6 +42,36 @@ ansible-playbook distribute.yml -e source_host=pi-lab -e target_hosts=lab \
 ansible-playbook revoke.yml -e source_host=pi-lab -e target_hosts=lab -e target_user=sysadmin
 ```
 
+### Other accounts than the Ansible account
+
+Ansible logs in as its own account (e.g. `sysadmin`) and works as root via `become`. Root can write into every home directory, so the key pair can belong to any account on the source host and the public key can go to any account on the targets — the Ansible account itself is not involved.
+
+```bash
+# openhab's key pair (created in /var/lib/openhab/.ssh), accepted by "pi" on every target
+ansible-playbook distribute.yml -e source_host=openhab-vm -e source_user=openhab -e target_user=pi
+```
+
+A system account with `/usr/sbin/nologin` as shell (like `openhab`) works as source: outgoing `ssh` needs no login shell. Target accounts need a real shell.
+
+**Different or several accounts per target (optional).** Without `-e target_user`, each target uses its own `key_targets` from `host_vars`/`group_vars` (or its `ansible_user` if it has none):
+
+```yaml
+# inventory/host_vars/pi-lab/keys.yml
+key_targets: [pi, mqtt]
+```
+
+```yaml
+# inventory/group_vars/nas.yml
+key_targets: backup
+```
+
+```bash
+ansible-playbook distribute.yml -e source_host=openhab-vm -e source_user=openhab -e skip_missing_users=true
+ansible-playbook revoke.yml     -e source_host=openhab-vm -e source_user=openhab
+```
+
+Order of precedence per target: `-e target_user` → the host's `key_targets` → its `ansible_user`. Do not put `key_targets` into `defaults.yml`: that file is loaded with `vars_files` and would override all host-specific values.
+
 Without a stored Vault password add `--ask-vault-pass`. Use any other inventory with `-i`.
 
 `source_host` is required; the playbooks fail with "Keyword 'hosts' is required" if it is missing.
@@ -56,7 +86,9 @@ Without a stored Vault password add `--ask-vault-pass`. Use any other inventory 
 | `key_file_name` | `id_<key_type>` | File in `~source_user/.ssh/`; an existing key is reused |
 | `key_comment` | `<user>@<host> (ansible-ssh-key-distribution)` | Comment of a newly generated key |
 | `target_hosts` | `all` | Inventory pattern of the receiving hosts; the source is always excluded |
-| `target_user` | `ansible_user` of each target | Account on the targets that accepts the key |
+| `target_user` | `ansible_user` of each target | Account on **all** targets that accepts the key |
+| `key_targets` | – (optional, per host) | One or more accounts on **this** target; set in `host_vars`/`group_vars`, used when `target_user` is not given |
+| `skip_missing_users` | `false` | Skip accounts that do not exist on a target instead of failing |
 | `restrict_from` | `false` | Prefix the key with `from="<source ansible_host>"` |
 | `distribute_known_hosts` | `true` | Add the targets' host keys to the source user's `known_hosts` |
 | `verify_logins` | `true` | Test `ssh -o BatchMode=yes` from the source to every target |
@@ -92,12 +124,16 @@ ansible-ssh-key-distribution/
 ├── revoke.yml                 remove the key from the targets
 ├── requirements.yml           ansible.windows (Windows targets only)
 └── tasks/
-    ├── linux_authorize.yml
+    ├── linux_authorize.yml          loops over the target accounts
+    ├── linux_authorize_user.yml
     ├── linux_revoke.yml
+    ├── linux_revoke_user.yml
     ├── windows_authorize.yml
-    └── windows_revoke.yml
+    ├── windows_authorize_user.yml
+    ├── windows_revoke.yml
+    └── windows_revoke_user.yml
 ```
 
 ## Tested
 
-Linux: generating a new key, reusing an existing one, a different `target_user` (written via `become`), `restrict_from`, `known_hosts` (login with `BatchMode=yes` without any prompt), idempotent re-runs (`changed=0`) and `revoke.yml` (login refused afterwards). The Windows tasks are syntax-checked but not yet tested on a Windows host.
+Linux: generating a new key, reusing an existing one, a different `target_user` (written via `become`), a `nologin` system account (`openhab`) as source, per-host `key_targets` with several accounts, `skip_missing_users` (missing account skipped, without it the run fails), `restrict_from`, `known_hosts` (login with `BatchMode=yes` without any prompt), idempotent re-runs (`changed=0`) and `revoke.yml` (login refused afterwards). The Windows tasks are syntax-checked but not yet tested on a Windows host.

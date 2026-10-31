@@ -1,32 +1,15 @@
 ---
-- name: Look up the target user
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ kd_user }}"
-
-- name: Ensure ~/.ssh of the target user exists
-  ansible.builtin.file:
-    path: "{{ getent_passwd[kd_user][4] }}/.ssh"
-    state: directory
-    owner: "{{ kd_user }}"
-    group: "{{ getent_passwd[kd_user][2] }}"
-    mode: "0700"
-
-- name: Authorize the public key (replaces an older line with the same key)
-  ansible.builtin.lineinfile:
-    path: "{{ getent_passwd[kd_user][4] }}/.ssh/authorized_keys"
-    regexp: "^(.*\\s)?[a-z0-9@.-]+\\s{{ kd_blob | regex_escape }}(\\s.*)?$"
-    line: "{{ kd_line }}"
-    create: true
-    owner: "{{ kd_user }}"
-    group: "{{ getent_passwd[kd_user][2] }}"
-    mode: "0600"
+- name: Authorize the key for each target account
+  ansible.builtin.include_tasks: linux_authorize_user.yml
+  loop: "{{ kd_users }}"
+  loop_control:
+    loop_var: kd_target
 
 # Only this small record is read by the source host (never the whole hostvars).
 - name: Remember connection data and host keys for the source host
   ansible.builtin.set_fact:
     kd_record:
-      user: "{{ kd_user }}"
+      users: "{{ kd_users_done | default([]) }}"
       address: "{{ ansible_host | default(inventory_hostname) }}"
       port: "{{ ansible_port | default(22) }}"
       known_name: "{{ (ansible_host | default(inventory_hostname)) if (ansible_port | default(22) | int) == 22
