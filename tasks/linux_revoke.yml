@@ -1,0 +1,13 @@
+---
+- name: Look up the target user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ kd_user }}"
+    fail_key: false
+
+- name: Remove the public key from authorized_keys
+  ansible.builtin.lineinfile:
+    path: "{{ getent_passwd[kd_user][4] }}/.ssh/authorized_keys"
+    regexp: "^(.*\\s)?[a-z0-9@.-]+\\s{{ kd_blob | regex_escape }}(\\s.*)?$"
+    state: absent
+  when: getent_passwd[kd_user] is not none

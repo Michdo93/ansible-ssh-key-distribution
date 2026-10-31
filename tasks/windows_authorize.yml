@@ -1,0 +1,50 @@
+---
+# Requires the ansible.windows collection (ansible-galaxy collection install -r requirements.yml).
+- name: Authorize the public key and read the host keys (Windows OpenSSH)
+  ansible.windows.win_powershell:
+    parameters:
+      User: "{{ kd_user }}"
+      Line: "{{ kd_line }}"
+      Blob: "{{ kd_blob }}"
+    script: |
+      param([string]$User, [string]$Line, [string]$Blob)
+      $ErrorActionPreference = 'Stop'
+      $admins = (Get-LocalGroup -SID 'S-1-5-32-544').Name
+      $isAdmin = [bool](Get-LocalGroupMember -Group $admins -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "$env:COMPUTERNAME\$User" -or $_.Name -eq $User })
+      if ($isAdmin) {
+        $file = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
+      } else {
+        $sid = (Get-LocalUser -Name $User).SID.Value
+        $prof = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
+        if (-not $prof) { throw "User $User has no profile yet; log in once before distributing keys." }
+        $dir = Join-Path $prof '.ssh'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $file = Join-Path $dir 'authorized_keys'
+      }
+      $lines = @()
+      if (Test-Path -LiteralPath $file) { $lines = @(Get-Content -LiteralPath $file | Where-Object { $_ -and ($_ -notmatch [regex]::Escape($Blob)) }) }
+      $old = if (Test-Path -LiteralPath $file) { (Get-Content -LiteralPath $file -Raw) } else { '' }
+      $lines += $Line
+      Set-Content -LiteralPath $file -Value $lines -Encoding ascii
+      if ($isAdmin) {
+        & icacls.exe $file /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null
+      } else {
+        & icacls.exe $file /inheritance:r /grant "${User}:F" /grant '*S-1-5-18:F' /grant '*S-1-5-32-544:F' | Out-Null
+      }
+      $Ansible.Changed = ((Get-Content -LiteralPath $file -Raw) -ne $old)
+      Get-ChildItem (Join-Path $env:ProgramData 'ssh') -Filter 'ssh_host_*_key.pub' |
+        ForEach-Object { ((Get-Content -LiteralPath $_.FullName -Raw).Trim() -split '\s+')[0..1] -join ' ' }
+  register: kd_win
+
+# Only this small record is read by the source host (never the whole hostvars).
+- name: Remember connection data and host keys for the source host
+  ansible.builtin.set_fact:
+    kd_record:
+      user: "{{ kd_user }}"
+      address: "{{ ansible_host | default(inventory_hostname) }}"
+      port: "{{ ansible_port | default(22) }}"
+      known_name: "{{ (ansible_host | default(inventory_hostname)) if (ansible_port | default(22) | int) == 22
+                     else '[' ~ (ansible_host | default(inventory_hostname)) ~ ']:' ~ ansible_port }}"
+      host_keys: >-
+          {{ kd_win.output | select('string') | list }}

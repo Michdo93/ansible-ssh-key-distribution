@@ -1,0 +1,149 @@
+---
+# Generate (or reuse) an SSH key pair on one host and authorize it on other hosts.
+#   ansible-playbook distribute.yml -e source_host=pi-lab [-e target_hosts=lab] [-e target_user=sysadmin]
+
+- name: Prepare the key pair on the source host
+  hosts: "{{ source_host }}"
+  gather_facts: false
+  become: true
+  vars_files: [defaults.yml]
+  tasks:
+    - name: Check that source_host is set
+      ansible.builtin.assert:
+        that: source_host | length > 0
+        fail_msg: "Set the source host: -e source_host=<inventory name>"
+      run_once: true
+
+    - name: Look up the source user
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ source_user }}"
+
+    - name: Remember paths of the source user
+      ansible.builtin.set_fact:
+        kd_home: "{{ getent_passwd[source_user][4] }}"
+        kd_group: "{{ getent_passwd[source_user][2] }}"
+        kd_key: "{{ getent_passwd[source_user][4] }}/.ssh/{{ key_file_name }}"
+
+    - name: Ensure ~/.ssh exists
+      ansible.builtin.file:
+        path: "{{ kd_home }}/.ssh"
+        state: directory
+        owner: "{{ source_user }}"
+        group: "{{ kd_group }}"
+        mode: "0700"
+
+    - name: Generate the key pair only if it does not exist yet
+      ansible.builtin.command:
+        cmd: ssh-keygen -q -t {{ key_type }} -N '' -C '{{ key_comment }}' -f '{{ kd_key }}'
+        creates: "{{ kd_key }}"
+
+    - name: Derive a missing public key from the private key
+      ansible.builtin.shell:
+        cmd: ssh-keygen -y -f '{{ kd_key }}' > '{{ kd_key }}.pub'
+        creates: "{{ kd_key }}.pub"
+
+    - name: Set ownership and permissions of the key pair
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: "{{ source_user }}"
+        group: "{{ kd_group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ kd_key }}", mode: "0600" }
+        - { path: "{{ kd_key }}.pub", mode: "0644" }
+
+    - name: Read the public key
+      ansible.builtin.slurp:
+        src: "{{ kd_key }}.pub"
+      register: kd_pub_raw
+
+    - name: Store the public key
+      ansible.builtin.set_fact:
+        kd_pubkey: "{{ (kd_pub_raw.content | b64decode).splitlines() | first | trim }}"
+
+    - name: Show the key that will be distributed
+      ansible.builtin.debug:
+        msg: "{{ source_user }}@{{ source_host }}: {{ kd_pubkey.split(' ')[0:2] | join(' ') | truncate(60, true) }}"
+
+- name: Authorize the key on the targets
+  hosts: "{{ target_hosts }}:!{{ source_host }}"
+  gather_facts: true
+  become: true
+  vars_files: [defaults.yml]
+  vars:
+    kd_pubkey: "{{ hostvars[source_host].kd_pubkey }}"
+    kd_user: "{{ target_user if target_user | length > 0 else ansible_user }}"
+    kd_from: "{{ hostvars[source_host].ansible_host | default(source_host) }}"
+    kd_line: "{{ ('from=\"' ~ kd_from ~ '\" ') if restrict_from | bool else '' }}{{ kd_pubkey }}"
+    kd_blob: "{{ kd_pubkey.split(' ')[1] }}"
+  tasks:
+    - name: Fail if the source host did not provide a key
+      ansible.builtin.assert:
+        that: hostvars[source_host].kd_pubkey is defined
+        fail_msg: "No public key from {{ source_host }} (see the first play)."
+
+    - name: Linux / Unix targets
+      ansible.builtin.include_tasks: tasks/linux_authorize.yml
+      when: ansible_os_family != 'Windows'
+
+    - name: Windows targets
+      ansible.builtin.include_tasks: tasks/windows_authorize.yml
+      when: ansible_os_family == 'Windows'
+
+- name: Trust the targets' host keys and verify logins from the source host
+  hosts: "{{ source_host }}"
+  gather_facts: false
+  become: true
+  vars_files: [defaults.yml]
+  tasks:
+    - name: Collect the targets that were authorized in this run
+      ansible.builtin.set_fact:
+        kd_done: "{{ query('inventory_hostnames', target_hosts ~ ':!' ~ source_host)
+                     | map('extract', hostvars) | selectattr('kd_record', 'defined')
+                     | map(attribute='kd_record') | list }}"
+
+    - name: Write the targets' host keys into known_hosts of the source user
+      ansible.builtin.known_hosts:
+        path: "{{ kd_home }}/.ssh/known_hosts"
+        name: "{{ item.0.known_name }}"
+        key: "{{ item.0.known_name }} {{ item.1 }}"
+        state: present
+      loop: "{{ kd_done | subelements('host_keys') }}"
+      loop_control:
+        label: "{{ item.0.known_name }} {{ item.1.split(' ')[0] }}"
+      when: distribute_known_hosts | bool
+
+    - name: Fix ownership of known_hosts
+      ansible.builtin.file:
+        path: "{{ kd_home }}/.ssh/known_hosts"
+        owner: "{{ source_user }}"
+        group: "{{ kd_group }}"
+        mode: "0644"
+      when: distribute_known_hosts | bool and kd_done | length > 0
+
+    - name: Test key-based SSH logins from the source host
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - "StrictHostKeyChecking={{ 'yes' if distribute_known_hosts | bool else 'accept-new' }}"
+          - -o
+          - "UserKnownHostsFile={{ kd_home }}/.ssh/known_hosts"
+          - -o
+          - ConnectTimeout=10
+          - -o
+          - IdentitiesOnly=yes
+          - -i
+          - "{{ kd_key }}"
+          - -p
+          - "{{ item.port }}"
+          - "{{ item.user }}@{{ item.address }}"
+          - "{{ 'exit' }}"
+      loop: "{{ kd_done }}"
+      loop_control:
+        label: "{{ item.user }}@{{ item.address }}:{{ item.port }}"
+      changed_when: false
+      when: verify_logins | bool

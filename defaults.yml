@@ -1,0 +1,23 @@
+---
+# Defaults for distribute.yml / revoke.yml. Override any of them with -e.
+
+# Host (inventory name) that gets the key pair. Required: -e source_host=<name>
+source_host: ""
+# Account on the source host that owns the key pair (default: its ansible_user).
+source_user: "{{ hostvars[source_host].ansible_user | default('root') }}"
+# Key pair. An existing key is reused; it is only generated when missing.
+key_type: ed25519            # ed25519 | ecdsa | rsa
+key_file_name: "id_{{ key_type }}"
+key_comment: "{{ source_user }}@{{ source_host }} (ansible-ssh-key-distribution)"
+
+# Hosts that receive the public key (inventory pattern). The source is always excluded.
+target_hosts: all
+# Account on each target that will accept the key (default: that host's ansible_user).
+target_user: ""
+# Restrict the key to logins coming from the source host's address (from="...").
+restrict_from: false
+# Write the targets' SSH host keys into the source user's known_hosts, so the first
+# connection needs no fingerprint confirmation (keys come via the trusted Ansible channel).
+distribute_known_hosts: true
+# Test an SSH login from the source to every target after distributing.
+verify_logins: true

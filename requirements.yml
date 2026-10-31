@@ -1,0 +1,4 @@
+---
+# Only needed for Windows targets; Linux targets use ansible-core modules only.
+collections:
+  - name: ansible.windows

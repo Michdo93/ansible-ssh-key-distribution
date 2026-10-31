@@ -1,0 +1,40 @@
+---
+# Remove the source host's public key from the targets again (the key pair itself stays).
+#   ansible-playbook revoke.yml -e source_host=pi-lab [-e target_hosts=lab] [-e target_user=sysadmin]
+
+- name: Read the public key on the source host
+  hosts: "{{ source_host }}"
+  gather_facts: false
+  become: true
+  vars_files: [defaults.yml]
+  tasks:
+    - name: Look up the source user
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ source_user }}"
+
+    - name: Read the public key
+      ansible.builtin.slurp:
+        src: "{{ getent_passwd[source_user][4] }}/.ssh/{{ key_file_name }}.pub"
+      register: kd_pub_raw
+
+    - name: Store the public key
+      ansible.builtin.set_fact:
+        kd_pubkey: "{{ (kd_pub_raw.content | b64decode).splitlines() | first | trim }}"
+
+- name: Remove the key from the targets
+  hosts: "{{ target_hosts }}:!{{ source_host }}"
+  gather_facts: true
+  become: true
+  vars_files: [defaults.yml]
+  vars:
+    kd_user: "{{ target_user if target_user | length > 0 else ansible_user }}"
+    kd_blob: "{{ hostvars[source_host].kd_pubkey.split(' ')[1] }}"
+  tasks:
+    - name: Linux / Unix targets
+      ansible.builtin.include_tasks: tasks/linux_revoke.yml
+      when: ansible_os_family != 'Windows'
+
+    - name: Windows targets
+      ansible.builtin.include_tasks: tasks/windows_revoke.yml
+      when: ansible_os_family == 'Windows'
