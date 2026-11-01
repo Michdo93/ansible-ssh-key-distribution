@@ -21,9 +21,9 @@
 
     - name: Remember paths of the source user
       ansible.builtin.set_fact:
-        kd_home: "{{ getent_passwd[source_user][4] }}"
-        kd_group: "{{ getent_passwd[source_user][2] }}"
-        kd_key: "{{ getent_passwd[source_user][4] }}/.ssh/{{ key_file_name }}"
+        kd_home: "{{ ansible_facts['getent_passwd'][source_user][4] }}"
+        kd_group: "{{ ansible_facts['getent_passwd'][source_user][2] }}"
+        kd_key: "{{ ansible_facts['getent_passwd'][source_user][4] }}/.ssh/{{ key_file_name }}"
 
     - name: Ensure ~/.ssh exists
       ansible.builtin.file:
@@ -89,11 +89,11 @@
 
     - name: Linux / Unix targets
       ansible.builtin.include_tasks: tasks/linux_authorize.yml
-      when: ansible_os_family != 'Windows'
+      when: ansible_facts['os_family'] != 'Windows'
 
     - name: Windows targets
       ansible.builtin.include_tasks: tasks/windows_authorize.yml
-      when: ansible_os_family == 'Windows'
+      when: ansible_facts['os_family'] == 'Windows'
 
 - name: Trust the targets' host keys and verify logins from the source host
   hosts: "{{ source_host }}"

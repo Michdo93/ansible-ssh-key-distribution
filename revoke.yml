@@ -15,7 +15,7 @@
 
     - name: Read the public key
       ansible.builtin.slurp:
-        src: "{{ getent_passwd[source_user][4] }}/.ssh/{{ key_file_name }}.pub"
+        src: "{{ ansible_facts['getent_passwd'][source_user][4] }}/.ssh/{{ key_file_name }}.pub"
       register: kd_pub_raw
 
     - name: Store the public key
@@ -37,8 +37,8 @@
   tasks:
     - name: Linux / Unix targets
       ansible.builtin.include_tasks: tasks/linux_revoke.yml
-      when: ansible_os_family != 'Windows'
+      when: ansible_facts['os_family'] != 'Windows'
 
     - name: Windows targets
       ansible.builtin.include_tasks: tasks/windows_revoke.yml
-      when: ansible_os_family == 'Windows'
+      when: ansible_facts['os_family'] == 'Windows'

@@ -8,27 +8,27 @@
 - name: "Skip missing account {{ kd_target }}"
   ansible.builtin.debug:
     msg: "Account {{ kd_target }} does not exist on {{ inventory_hostname }}; skipped."
-  when: getent_passwd[kd_target] is none
+  when: ansible_facts['getent_passwd'][kd_target] is none
 
 - name: "Authorize the key for {{ kd_target }}"
-  when: getent_passwd[kd_target] is not none
+  when: ansible_facts['getent_passwd'][kd_target] is not none
   block:
     - name: "Ensure ~/.ssh of {{ kd_target }} exists"
       ansible.builtin.file:
-        path: "{{ getent_passwd[kd_target][4] }}/.ssh"
+        path: "{{ ansible_facts['getent_passwd'][kd_target][4] }}/.ssh"
         state: directory
         owner: "{{ kd_target }}"
-        group: "{{ getent_passwd[kd_target][2] }}"
+        group: "{{ ansible_facts['getent_passwd'][kd_target][2] }}"
         mode: "0700"
 
     - name: "Add the public key for {{ kd_target }} (replaces an older line with the same key)"
       ansible.builtin.lineinfile:
-        path: "{{ getent_passwd[kd_target][4] }}/.ssh/authorized_keys"
+        path: "{{ ansible_facts['getent_passwd'][kd_target][4] }}/.ssh/authorized_keys"
         regexp: "^(.*\\s)?[a-z0-9@.-]+\\s{{ kd_blob | regex_escape }}(\\s.*)?$"
         line: "{{ kd_line }}"
         create: true
         owner: "{{ kd_target }}"
-        group: "{{ getent_passwd[kd_target][2] }}"
+        group: "{{ ansible_facts['getent_passwd'][kd_target][2] }}"
         mode: "0600"
 
     - name: "Remember {{ kd_target }} for the login test"

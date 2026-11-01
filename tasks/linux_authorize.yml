@@ -15,8 +15,8 @@
       known_name: "{{ (ansible_host | default(inventory_hostname)) if (ansible_port | default(22) | int) == 22
                      else '[' ~ (ansible_host | default(inventory_hostname)) ~ ']:' ~ ansible_port }}"
       host_keys: >-
-          {{ [('ssh-ed25519 ' ~ ansible_ssh_host_key_ed25519_public) if ansible_ssh_host_key_ed25519_public is defined else '',
-              ((ansible_ssh_host_key_ecdsa_public_keytype | default('ecdsa-sha2-nistp256')) ~ ' ' ~ ansible_ssh_host_key_ecdsa_public)
-                if ansible_ssh_host_key_ecdsa_public is defined else '',
-              ('ssh-rsa ' ~ ansible_ssh_host_key_rsa_public) if ansible_ssh_host_key_rsa_public is defined else '']
+          {{ [('ssh-ed25519 ' ~ ansible_facts['ssh_host_key_ed25519_public']) if 'ssh_host_key_ed25519_public' in ansible_facts else '',
+              ((ansible_facts['ssh_host_key_ecdsa_public_keytype'] | default('ecdsa-sha2-nistp256')) ~ ' ' ~ ansible_facts['ssh_host_key_ecdsa_public'])
+                if 'ssh_host_key_ecdsa_public' in ansible_facts else '',
+              ('ssh-rsa ' ~ ansible_facts['ssh_host_key_rsa_public']) if 'ssh_host_key_rsa_public' in ansible_facts else '']
              | select | list }}
